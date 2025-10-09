@@ -1,23 +1,53 @@
 import socket
 import ssl
+from pathlib import Path
+
 '''
-This rudimentary python implementation of a web browser can:
-    - parse a URL into a scheme, host, port, and path;
-    - connect to that host using the socket and ssl libraries;
-    - send an HTTP request to that host, including a Host header;
-    - split the HTTP response into a status line, headers, and a body;
-    - print the text (and not the tags) in the body.
-As guided by Web Browser Engineering by Pavel Panchekha & Chris Harrelson
+' This rudimentary python implementation of a web browser can:
+'    - parse a URL into a scheme, host, port, and path;
+'    - connect to that host using the socket and ssl libraries;
+'    - send an HTTP request to that host, including a Host header;
+'    - split the HTTP response into a status line, headers, and a body;
+'    - print the text (and not the tags) in the body.
+' As guided by Web Browser Engineering by Pavel Panchekha & Chris Harrelson
+' Updated functionality by me:
+'    - HTTP/1.1
+'    - File URLs and default home page
+'    # TODO: data
+'    # TODO: Entities
+'    # TODO: view-source
+'    # TODO: Keep-alive
+'    # TODO: Redirects
+'    # TODO: Caching
+'    # TODO: Compression
 '''
+
 class URL:
     def __init__(self, url):
         # [scheme][hostname][path]
         self.scheme, url = url.split("://", 1)
-        assert self.scheme in ["http", "https"]  # detect scheme
+        assert self.scheme in ["http", "https", "file"]  # detect scheme
+        
         if self.scheme == "http":
             self.port = 80
         elif self.scheme == "https":
             self.port = 443
+        elif self.scheme == "file":
+            # Handle file search
+            try:
+                if url[0] == '/':
+                    file_path = "~" + url
+                else:
+                    file_path = "~/" + url
+                abs_path = Path(file_path).expanduser()
+                if abs_path.is_file():
+                    with open(abs_path, 'r') as file:
+                        content = file.read()
+                        print(content)
+                sys.exit(1)
+            except FileNotFoundError:
+                print(f'Error: Requested file {url} was not found.')
+                sys.exit(1)
 
         # Separate host from path
         if '/' not in url:
@@ -45,8 +75,10 @@ class URL:
             s = ctx.wrap_socket(s, server_hostname=self.host)  # wrap socket
 
         # Request to server, send method
-        request = "GET {} HTTP/1.0\r\n".format(self.path)
+        request = "GET {} HTTP/1.1\r\n".format(self.path)
         request += "Host: {}\r\n".format(self.host)
+        request += "Connection: {}\r\n".format("close")
+        request += "User-Agent: {}\r\n".format("PyBrowse")
         request += "\r\n"
         s.send(request.encode("utf8"))
         
@@ -90,4 +122,10 @@ def load(url):
 
 if __name__ == "__main__":
     import sys
-    load(URL(sys.argv[1]))
+    try:
+        load(URL(sys.argv[1]))
+    except:
+        # Show default Home Page if load fails
+        with open('home.txt', 'r') as file:
+            content = file.read()
+            print(content)
