@@ -13,9 +13,9 @@ from pathlib import Path
 ' Updated functionality by me:
 '    - HTTP/1.1
 '    - File URLs and default home page
-'    # TODO: data
-'    # TODO: Entities
-'    # TODO: view-source
+'    - 'data:' scheme (text/HTML)
+'    - Convert Entities (&lt; and &gt;)
+'    - 'view-source:' scheme (show tags)
 '    # TODO: Keep-alive
 '    # TODO: Redirects
 '    # TODO: Caching
@@ -25,12 +25,29 @@ from pathlib import Path
 class URL:
     def __init__(self, url):
         # [scheme][hostname][path]
-        self.scheme, url = url.split("://", 1)
-        assert self.scheme in ["http", "https", "file"]  # detect scheme
+        try:
+            # check for data scheme
+            if url.startswith("data:"):
+                self.scheme, url = url.split(":", 1)
+                mime_type, data_sch_content = url.split(",", 1)
+                # only support text/html so far
+                if mime_type != "text/html":
+                    print("This MIME type is currently unsupported.")
+                    sys.exit(1)
+                print(data_sch_content)
+                sys.exit(0)
+            else:
+                self.scheme, url = url.split("://", 1)
+        # Catch url/filepath format issues    
+        except ValueError:
+            print("Value Error:")
+            print("Please Review Url or File Path Format, must include '://'.")
+            sys.exit(1)
+        assert self.scheme in ["http", "https", "file", "view-source:http", "view-source:https"]  # detect scheme
         
-        if self.scheme == "http":
+        if self.scheme == "http" or self.scheme == "view-source:http":
             self.port = 80
-        elif self.scheme == "https":
+        elif self.scheme == "https" or self.scheme == "view-source:https":
             self.port = 443
         elif self.scheme == "file":
             # Handle file search
@@ -44,7 +61,7 @@ class URL:
                     with open(abs_path, 'r') as file:
                         content = file.read()
                         print(content)
-                sys.exit(1)
+                sys.exit(0)
             except FileNotFoundError:
                 print(f'Error: Requested file {url} was not found.')
                 sys.exit(1)
@@ -105,15 +122,24 @@ class URL:
         return content
 
 def show(body):
+    # Don't skip tags if view-source
+    if sys.argv[1].startswith("view-source"):
+        print(body)
+        sys.exit(0)
     # Skip tags in text
+    full_c = ""
     in_tag = False
     for c in body:
-        if c =="<":
+        if c == "<":
             in_tag = True
         elif c == ">":
             in_tag = False
         elif not in_tag:
-            print(c, end="")
+            full_c += c
+    # Entities gt and lt converted
+    full_c = full_c.replace("&lt;", "<")
+    full_c = full_c.replace("&gt;", ">")
+    print(full_c)
 
 def load(url):
     # load page, request and show
@@ -122,10 +148,19 @@ def load(url):
 
 if __name__ == "__main__":
     import sys
-    try:
-        load(URL(sys.argv[1]))
-    except:
-        # Show default Home Page if load fails
+    args = len(sys.argv)
+    # if no search value, return home page
+    if args < 2:
+        # Home page if no queries/ initial open
         with open('home.txt', 'r') as file:
             content = file.read()
-            print(content)
+            print(content)        
+    if args == 2:
+        # Standard Query, filepaths and urls
+        load(URL(sys.argv[1]))
+    if args > 2:
+        # Data schema content space useage is giving extra args
+        if sys.argv[1].startswith("data:"):
+            list_args = sys.argv[1:]
+            data_query_str = " ".join(list_args)
+            load(URL(data_query_str))
