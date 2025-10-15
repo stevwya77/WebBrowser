@@ -4,8 +4,8 @@
 
 # Checklist:
 ## Part 1: Loading Pages
-- [X] ---> Downloading Web Pages (main complete; working on extras) <---
-- [] Drawing to the Screen
+- [X] Downloading Web Pages
+- [] --> Drawing to the Screen <-- (yay!)
 - [] Formatting Text
 
 ## Part 2: Viewing Documents
