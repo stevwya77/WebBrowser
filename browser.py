@@ -1,5 +1,7 @@
 import socket
 import ssl
+import time
+import gzip
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -19,9 +21,10 @@ from urllib.parse import urljoin
 '    - 'view-source:' scheme (show tags)
 '    - Keep-alive connection and reuse socket repeat requests
 '    - Redirects: Error Code 300's handled
-'    # TODO: Caching
-'    # TODO: Compression
+'    - Caching: Cache-Control support for no-store and max-age vals
+'    - Compression: supports encoding headers and compression
 '''
+cache = {}
 
 class URL:
     def __init__(self, url):
@@ -82,8 +85,22 @@ class URL:
             self.host, port = self.host.split(':', 1)
             self.port = int(port)
 
-    def request(self):
+        # set cache key
+        self.cache_key = f"{self.scheme}://{self.host}:{self.port}{self.path}"
 
+    def request(self):
+        # check cache before request
+        if self.cache_key in cache:
+            cached = cache[self.cache_key]
+            age = time.time() - cached["stored"]
+            # use cache if exists and not expired
+            if age < cached["max_age"]:
+                print("Using cached")
+                return cached["content"]
+            else:
+                print("deleting")
+                del cache[self.cache_key]  # max age reached, clear cache
+            
         if self.saved_socket is None:
             # Create Socket
             s = socket.socket(
@@ -107,6 +124,7 @@ class URL:
         request = "GET {} HTTP/1.1\r\n".format(self.path)
         request += "Host: {}\r\n".format(self.host)
         request += "Connection: {}\r\n".format("keep-alive")
+        request += "Accept-Encoding: {}\r\n".format("gzip")
         request += "User-Agent: {}\r\n".format("PyBrowse")
         request += "\r\n"
         s.send(request.encode("utf8"))
@@ -127,10 +145,6 @@ class URL:
                 header, value = line.split(":", 1)
                 response_headers[header.casefold()] = value.strip()
             
-        # block unusual data behavior
-        assert "transfer-encoding" not in response_headers
-        assert "content-encoding" not in response_headers
-        
         # Check for and handle Error code 300 redirects
         if int(status) > 299 and int(status) < 400:
             location = response_headers['location']
@@ -150,12 +164,64 @@ class URL:
             redirect.num_redirects = self.num_redirects + 1
             return redirect.request()
 
-        # Read only as many bytes as given in Content-Length header
-        try:
-            con_len = int(response_headers.get("content-length", 0))
+        # Read based on encoding provided
+        transfer_encoding = response_headers.get('transfer-encoding', '').lower()
+        content_encoding = response_headers.get('content-encoding', '').lower()
+
+        # Read by chunks 
+        if "chunked" in transfer_encoding:
+            content = b""
+            while True:
+                line = response.readline()
+                chunk_size = int(line.strip(), 16)
+                if chunk_size == 0:
+                    break
+                chunk = response.read(chunk_size)
+                content += chunk
+                response.read(2) #  for \r\n
+            # discard trailing headers
+            while True:
+                line = response.readline()
+                if line == b"\r\n":
+                    break
+        # Read only as many bytes as given in content-length header
+        elif "content-length" in response_headers:
+            con_len = int(response_headers.get("content-length"))
             content = response.read(con_len)
-        except:
-            raise ValueError("Content-Length header missing in response")
+        # content length / transfer encoding not provided, read as is
+        else:
+            content = response.read()
+
+        # Handle and decompress g-zip encoding
+        if 'gzip' in content_encoding:
+            try:
+                print("decompressed")
+                content = gzip.decompress(content)
+            except Exception as e:
+                raise ValueError(f'Failed to decompress gzip: {e}')
+
+        # Check if cachable allowed
+        is_cachable = False
+        max_age = None
+        cache_control = response_headers.get('cache-control', '').lower()
+        
+        if "no-store" in cache_control:
+            is_cachable = False  # don't cache
+        elif "max-age=" in cache_control:
+            try:
+                is_cachable = True
+                max_age = int(cache_control.split("max-age=", 1)[1].split(',')[0].strip())
+                print(f'max-age:{max_age}')
+            except ValueError:
+                pass
+        
+        if is_cachable:
+            cache[self.cache_key] = {
+                "stored": time.time(),
+                "max_age": max_age,
+                "content": content
+            }
+            print("Cached")
         
         # display body
         return content
